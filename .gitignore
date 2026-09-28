@@ -1,1 +1,3 @@
 hermes-agent/
+.vscode
+__pycache__/

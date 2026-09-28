@@ -1,6 +1,6 @@
 # 第 1 周：理解控制流，写出最小执行循环
 
-- 状态：进行中；任务 A 已通过；任务 B、C 尚未提交。
+- 状态：进行中；任务 A、B 已通过；任务 C 的可复现验证已完成，设计取舍仍待提交。
 - 预计投入：6–8 小时，可按实际节奏拆分。
 - 前置基础：熟悉 Python 和 tool calling。
 - 推进规则：[学习大纲](OUTLINE.md)；本周评估通过后再制定第 2 周详细计划。
@@ -90,10 +90,10 @@ CLI 收到用户输入
 | --- | --- | --- | --- |
 | W1-01 | 能区分 Session、Turn、Iteration、Tool call，解释模型与程序各自的职责 | 通过 | 四个概念和调用链已说明；模型提出工具调用、程序执行的职责可由现有描述和路径看出，无需再写重复说明；见下方最新评估 |
 | W1-02 | 能结合源码解释普通回答和工具调用两条路径，并展示完整消息序列 | 通过 | 两条路径、`tool_call_id` 角色和消息进入 `messages` 的主要位置已展示；无需另造具体 ID 示例；见下方最新评估 |
-| W1-03 | 最小 CLI 可以普通回答，并在连续两次输入间保留内存历史 | 待评估 | 尚未提交 |
-| W1-04 | 至少一次真实模型运行完成工具闭环；后续请求保留 assistant 调用和匹配的 tool 结果 | 待评估 | 尚未提交 |
-| W1-05 | 假模型持续请求工具时，到达调用预算后明确停止，实际模型调用次数不超限 | 待评估 | 尚未提交 |
-| W1-06 | 有可复现的验证方法和运行轨迹，能区分正常完成、预算停止与基本失败 | 待评估 | 尚未提交 |
+| W1-03 | 最小 CLI 可以普通回答，并在连续两次输入间保留内存历史 | 通过 | 可控响应验证 CLI 两轮输入及 `system, user, assistant, user, assistant` 内存历史；模型适配仍未消费完整历史，属任务 B 待补 |
+| W1-04 | 至少一次真实模型运行完成工具闭环；后续请求保留 assistant 调用和匹配的 tool 结果 | 通过 | 真实 DeepSeek 请求完成 `add(7, 11) → 18`，共 2 次模型调用；assistant 调用和 tool 结果 ID 匹配，后续请求成功得到最终回答；见下方真实运行记录 |
+| W1-05 | 假模型持续请求工具时，到达调用预算后明确停止，实际模型调用次数不超限 | 通过 | 可控假模型持续请求工具时恰好调用 60/60 次后停止；第 60 次返回最终回答也能正常结束 |
+| W1-06 | 有可复现的验证方法和运行轨迹，能区分正常完成、预算停止与基本失败 | 通过 | `mine/tests/verify_week01.py` 离线覆盖三条路径并打印去敏轨迹；`mine/tests/verify_week01_live.py` 真实工具运行通过；见 `mine/docs/week-01/verification.md` |
 | W1-07 | 能说明自己的最小实现与 Hermes 的至少三点取舍及适用边界 | 待评估 | 尚未提交 |
 
 本周不要求工具注册框架、文件工具、持久化、记忆、异步并发或 UI。额外实现这些能力不抵消上表中的缺项。
@@ -157,3 +157,62 @@ CLI 收到用户输入
 - **W1-02：通过。** 笔记分开写了普通回答和工具调用消息序列，并定位 user、assistant、tool 消息进入 `messages` 的主要函数；`tool(tool_call_id)` 已表达结果的关联角色。本阶段不要求具体 ID 值或 Session 数据库写入细节。
 - **非阻碍性精度建议：** 第 34 行的模型响应先经 `perform_api_call` 获取，再由 `normalize_model_response` 解析为 assistant 消息；可在以后改笔记时顺手调整。
 - **本周状态与下一步：** 任务 A 完成；W1-03 至 W1-07 尚未评估。继续任务 B 的最小 CLI 和内存消息循环，第 1 周仍在进行中。
+
+### 2026-09-28：任务 B 简略实现首轮 review
+
+- **提交与验证：** 审阅 `mine/src/agent/agent.py`、`mine/src/agent/tools.py` 和更新的 `mine/docs/week-01/agent-loop.md`。运行 `python3 -m py_compile` 通过；使用不修改源码的可控假模型分别执行普通回答、连续两次输入、一次工具闭环和持续请求工具的场景；直接运行 `python3 mine/src/agent/agent.py` 无 CLI 交互输出。未调用付费或真实模型。
+- **主要问题 1（阻碍预算验收）：** `run_conversation` 将 `cur_iteration` 初始化为 0，但循环内从未增加。持续请求工具的假模型在配置上限 60 时仍发起第 62 次调用；验证用的哨兵主动抛错才结束。需要按模型调用次数推进计数，并在上限处返回明确的停止原因。
+- **主要问题 2（阻碍工具协议）：** 工具路径只把 `tool` 结果加入 `conversation_history`，没有先保存带 `tool_calls` 的 assistant 消息，也没有 `id`/`tool_call_id` 配对。一次工具任务的实际消息角色为 `system, user, tool, assistant`；后续真实模型无法据此得到完整的调用与结果链。多工具调用同样需要各自的匹配结果。
+- **主要问题 3（任务 B 尚不完整）：** 现有 `api_call` 使用随机选择且不读取历史，不能稳定脚本化验证输入消息或停止条件；源码没有 CLI 输入循环、真实模型适配入口或基本失败后的明确停止行为。连续两次调用同一 `Agent` 的确保留了 `system, user, assistant, user, assistant` 历史，这是已验证的进展。
+- **笔记勘误：** `mine/docs/week-01/agent-loop.md` 最后一行称工具在“下一个 Iteration”调用；参考主循环在解析出 `tool_calls` 后于**当前** Iteration 执行工具，下一次 Iteration 才把结果交给模型再次调用。
+- **验收映射：** W1-03 部分完成，W1-05 未通过；W1-04 尚无真实模型证据，且当前协议阻碍该项；W1-06、W1-07 未提交相应证据，保持待评估。任务 A 已通过的结论不因本次 review 改变。
+- **最小下一步：** 先用可脚本化响应固定普通回答、工具调用和持续工具调用三条路径；修正调用计数与 assistant/tool 消息配对；然后补 CLI、适配入口和运行记录。保留简洁函数结构即可，无需提前实现完整工具框架。
+
+### 2026-09-28：任务 B 第二轮 review
+
+- **提交与验证：** 重新审阅 `mine/src/agent/agent.py`、`mine/src/agent/tools.py`；以不修改源码的可控模型验证一次含两个工具调用的请求、两次连续用户输入、持续工具调用到默认上限 60，以及第 60 次给出最终回答。以模拟 CLI 输入验证两轮对话与退出。未运行真实模型，也未看到项目内保存的验证脚本或轨迹。
+- **W1-03：通过。** CLI 已读取多次用户输入并复用同一个 Agent；可控响应下能打印两轮回答，历史角色为 `system, user, assistant, user, assistant`。收到 EOF 会抛未捕获的 `EOFError`，建议处理，但不单独阻止此项通过。
+- **W1-05：通过。** `cur_iteration` 现在随工具轮次增加；持续工具调用恰好在 60 次模型调用后以明确的 `RuntimeError` 停止，没有第 61 次调用。若最后一次允许的模型调用给出文本回答，则正常结束。CLI 尚未将预算异常转换为友好提示，这是后续可改进项。
+- **阻碍任务 B 工具闭环的缺陷：** 工具路径在历史中追加了普通 assistant 文本，未把 `response["tool_calls"]` 保存在该 assistant 消息里。验证得到 `system → user → assistant(无 tool_calls) → tool(call_1) → tool(call_2) → assistant`；两个 tool 结果都缺少可配对的历史请求，真实模型协议无法据此重放完整闭环。
+- **模型适配仍待补：** 内置 `api_call` 随机选择分支，仅读取 `last_message()`，未消费完整 `conversation_history`；没有可脚本化假模型或真实模型接入。CLI 的历史保留已验证，但“下一次模型请求接收已有历史”尚无证据。工具调用 ID 在随机假模型中固定重复，也不适合作为多轮协议验证来源。
+- **其他验收项：** W1-04 未提交真实模型运行，W1-06 未提交可复现轨迹和失败分类，W1-07 未提交取舍对照，保持待评估。任务 B 仍为部分完成；任务 A 已通过的结论不变。
+- **下一步：** 先让 assistant 工具消息携带本轮全部 `tool_calls`，再以可脚本化假模型检查每个调用都有匹配结果及下一次请求包含完整历史；之后接入真实模型并记录运行证据。EOF 与 CLI 异常显示可顺手改善。
+
+### 2026-09-28：任务 B 第三轮 review
+
+- **提交与验证：** 审阅更新的 `mine/src/agent/agent.py`；使用不修改源码的可控假模型运行一次含两个工具调用的请求、两次连续用户输入及持续工具调用到上限。未调用真实模型，未修改用户实现。
+- **工具消息问题已修正：** `run_conversation` 现在将整批 `tool_calls` 加入 assistant 消息，再逐个执行工具并追加结果。实测角色顺序为 `system → user → assistant(tool_calls) → tool(call_1) → tool(call_2) → assistant`；两个结果的 `tool_call_id` 均与 assistant 中的调用对应，第二次模型调用前的历史包含完整链。
+- **预算与跨 Turn 历史复核：** 持续工具调用正好在 60/60 次模型调用后停止；第二次用户输入前的请求历史包含前一轮的 `system, user, assistant`。W1-03、W1-05 继续通过。
+- **仍待完成：** 内置 `api_call` 仍以随机分支和 `last_message()` 生成模拟响应；注释中的 `_send(self.conversation_history)` 尚未实现，因此当前不能证明真实模型接收完整历史。项目内未保存可脚本化假模型、验证轨迹，也无真实模型适配和运行记录。W1-04、W1-06、W1-07 保持待评估；任务 B 仍为部分完成。
+- **非阻碍性建议：** 当接入真实 API 时，将当前自定义 `tool_calls` 结构转换为该 API 所需格式，并为每次工具调用提供不重复的 ID；CLI 的 EOF 和预算异常可转为正常提示。本周无需扩展成完整工具框架。
+
+### 2026-09-28：任务 B 第四轮 review（DeepSeek 客户端初稿）
+
+- **提交与验证：** 审阅 `mine/src/agent/client.py`、`mine/src/agent/agent.py`、`mine/src/agent/tools.py`、`mine/src/main.py` 和依赖声明。核对 [DeepSeek 官方 thinking mode 文档](https://api-docs.deepseek.com/guides/thinking_mode/) 与 Chat Completions 接口文档；当前执行环境的 `python3` 缺少 `openai`、`python-dotenv`，所以使用本地 OpenAI 替身检查请求消息，未发起付费 API 调用。未看到用户提交的真实模型运行轨迹。
+- **已有进展：** `DeepseekClient.chat` 现在将完整的 `conversation_history` 传给 `chat.completions.create`，模型名 `deepseek-flash`、thinking 参数与工具 schema 符合当前官方文档。替身场景中，一次工具调用后的第二次请求包含 `system → user → assistant(tool_calls) → tool`，工具 ID 能匹配；连续两轮输入的历史也传入客户端。
+- **阻碍真实 thinking 模式闭环：** 客户端启用了 thinking，并在每次请求都提供 `tools`。官方文档要求后续请求完整回传每条 assistant 消息的 `reasoning_content`，否则 API 返回 400。`run_conversation` 只将 `content`、`tool_calls` 写入历史；本地替身确认第二次模型请求和下一用户 Turn 均缺失 `reasoning_content`。需保留模型响应的这个字段，再进行真实运行验收。
+- **基本失败行为缺口：** `json.loads(tool_call["function"]["arguments"])` 在工具执行的异常处理之前运行；用格式错误的参数复现 `JSONDecodeError`，历史停在 assistant 工具调用消息，没有匹配的 tool 结果，也没有明确的 CLI 停止提示。至少需要把此类失败明确报告并停止；若选择继续调用模型，则必须补匹配的错误 tool 结果。
+- **验收映射：** W1-03 已有 CLI 与跨 Turn 历史证据、W1-05 已有预算证据，结论不变。W1-04 因无真实模型记录且存在上述 thinking 协议缺项继续待评估；W1-06、W1-07 仍未提交相应产出。任务 B 部分完成，第 1 周继续进行。
+- **下一步：** 优先回传 `reasoning_content` 并处理格式错误的工具参数；然后在已安装依赖和已配置密钥的环境中完成一次真实工具闭环，保存去敏轨迹。无需增加多供应商框架。
+
+### 2026-09-28：任务 B 第五轮 review
+
+- **提交与验证：** 审阅更新的 `mine/src/agent/agent.py`，对 `agent.py`、`client.py`、`tools.py`、`main.py` 做 Python 语法解析；使用不触网的 OpenAI 客户端替身验证工具闭环、跨 Turn 历史、格式错误的工具参数和持续工具调用上限。当前执行环境未安装 `openai`、`python-dotenv`，没有发起真实 API 调用。
+- **thinking 历史修正已验证：** `run_conversation` 现在直接保存客户端返回的完整 assistant 消息。替身返回 `reasoning_content` 后，工具结果之后的第二次请求包含该字段；下一用户 Turn 的请求也保留前两条 assistant 的 `reasoning_content`，符合 [DeepSeek 官方 thinking mode 文档](https://api-docs.deepseek.com/guides/thinking_mode/) 所要求的回传形式。
+- **工具错误修正已验证：** 格式错误的 `function.arguments` 现在被 `run_tool` 捕获，追加具有匹配 `tool_call_id` 的错误 tool 消息，再交给下一次模型调用；未留下孤立的 assistant 工具调用。
+- **预算复核：** 替身持续返回工具调用时，实际模型调用次数为 60/60，随后以预算异常停止，没有发起第 61 次请求。W1-03、W1-05 原通过结论保持。
+- **验收边界：** W1-04 仍需一次真实模型工具运行记录；W1-06 仍需项目内可复现的验证方法和代表性轨迹；W1-07 仍需三点设计取舍。任务 B 的控制流和 DeepSeek 请求结构已在本地替身中验证，但本周尚未完成。CLI 的 EOF/异常提示属于非阻碍性改进。
+
+### 2026-09-28：真实 DeepSeek 工具闭环验证
+
+- **授权与环境：** 用户明确授权真实请求，并将 `MAX_ITERATIONS` 设为 5。使用 `mine/src/.venv/bin/python`、项目 `mine/src/.env` 和 `deepseek-flash`，仅运行合成算术问题，未输出密钥或推理正文。首次联网尝试因进程环境中的同名密钥与 `.env` 不同而返回 401；随后按 `mine/src/main.py` 的 `load_dotenv(override=True)` 行为重试成功。沙箱内的连接失败未到达 API。
+- **助手实测结果：** 用户问题要求调用 `add` 计算 7+11；模型第 1 次请求返回一个 `add` 工具调用，assistant 消息含 `reasoning_content`；程序执行得 18，加入带相同 `tool_call_id` 的 tool 结果；模型第 2 次请求返回“7 加 11 的结果是 18”。最终消息角色为 `system → user → assistant(tool_calls) → tool → assistant`，实际模型调用次数 2/5。
+- **W1-04：通过。** 真实模型完成工具闭环；后续请求成功处理了 assistant 调用及匹配 tool 结果，未发生此前的 thinking 协议 400 错误。该结论基于助手真实运行的去敏轨迹与已审阅的 `Agent.api_call` 历史传递路径。
+- **其余状态：** W1-03、W1-05 继续通过；W1-06 仍需在项目中保存可复现的普通完成、预算停止与基本失败的验证方法和轨迹，W1-07 仍需至少三点取舍说明。第 1 周继续进行，不提前开启第 2 周。
+
+### 2026-09-28：W1-06 可复现验证完成
+
+- **提交范围：** 助手根据用户授权创建 `mine/tests/verify_week01.py`、`mine/tests/verify_week01_live.py` 和 `mine/docs/week-01/verification.md`；未改动用户的 Agent 实现。离线脚本使用固定响应假客户端，不需要密钥或网络；真实脚本限定最多 5 次模型调用，只输出去敏轨迹。
+- **助手复核：** 执行 `mine/src/.venv/bin/python mine/tests/verify_week01.py`，退出码 0。正常工具完成：2 次调用，`add` 结果 18，`final_response`；持续工具调用：3/3 次后 `iteration_budget_exhausted`，没有第 4 次调用；格式错误参数：2 次调用，匹配 ID 的错误 tool 结果后得到最终回答，`tool_error_then_final_response`。每条轨迹含角色序列、工具名、调用 ID、结果、调用次数和结束原因。
+- **真实运行：** 用户明确允许计费调用。执行 `mine/src/.venv/bin/python mine/tests/verify_week01_live.py`，退出码 0，真实 DeepSeek 使用 2/5 次模型调用完成 `add(7, 11) → 18`；调用与结果 ID 相同，两条 assistant 消息均含 `reasoning_content`。未输出密钥或推理正文；详细去敏记录在验证文档。
+- **验收结论：** W1-06 通过；W1-01 至 W1-06 现均通过。W1-07 的三点实现取舍及适用边界尚未提交，第 1 周继续进行，不创建第 2 周详细计划。

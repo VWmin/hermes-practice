@@ -30,8 +30,14 @@ Tool call：工具通常是本地定义的方法，模型回复可能认为需�
 普通回答：user -> assistant
 工具调用：user -> assistant(tool_calls) -> tool(tool_call_id) -> assistant
 
-用户输入：由用户提供，在 build_turn_context() 中追加到 messages
-模型回复：1. 无 tool_calls：由 perform_api_call() 产生，在 finish_text_response() 中追加 2. 有 tool_calls：由 perform_api_call() 产生，在 run_tool_round() 中在调用工具之前追加
-工具结果：由 agent._execute_tool_calls() 产生，在 _commit_tool_result() 中追加
+用户输入：由用户提供，在 `build_turn_context()` 中追加到 messages
+模型回复：1. 无 tool_calls：由 `perform_api_call()` 产生，在 `finish_text_response()` 中追加 2. 有 tool_calls：由 `perform_api_call()` 产生，在 `run_tool_round()` 中在调用工具之前追加
+工具结果：由 `agent._execute_tool_calls()` 产生，在 `_commit_tool_result()` 中追加
 
 模型 & anget 程序：模型提出工具调用；程序校验、执行、追加结果，并控制继续或停止
+
+如果模型任务需要调用工具，是在同一个 Iteration 调用，还是在下一个？当前。
+
+如果 iter 超过上限，如何处理？额外再发一次，让模型直接总结当前工作。
+
+tool_call_id 是谁分配的？通常是模型返回中带的，如果没有 hermes 也会为其分配。
