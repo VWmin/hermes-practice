@@ -1,8 +1,7 @@
-import json
-from typing import Any, Callable
-
-from agent.tools import TOOL_FUNCTIONS, tools_schem
+from agent.model_tools import tools_schema, run_tool
 from agent.client import Client, DeepseekClient
+from agent.state import State
+from typing import Any
 
 
 class Agent:
@@ -11,8 +10,9 @@ class Agent:
 
     def __init__(self, system_message: str):
         self.conversation_history = [{"role": "system", "content": system_message}]
-        self.tools = tools_schem()
+        self.tools = tools_schema()
         self.client: Client = DeepseekClient(tools=self.tools)
+        self.state = State()
 
     def append_message(self, role: str, content: str, extra=None):
         extra = extra or {}
@@ -45,20 +45,22 @@ class Agent:
     def last_message(self) -> str:
         return self.conversation_history[-1]["content"] if self.conversation_history else ""
 
-    def tool_calls(self, tool_calls: list):
+    def tool_calls(self, tool_calls: list[dict[str, Any]]):
+        # ensure tool_call id
+        repeat_id = set()
+        for tool_call in tool_calls:
+            if "id" not in tool_call or not tool_call["id"] or tool_call["id"] in repeat_id:
+                while True:
+                    next_id = f"{self.state.tool_call_id_prefix}{self.state.tool_call_id_counter}"
+                    self.state.tool_call_id_counter += 1
+                    if next_id not in repeat_id:
+                        tool_call["id"] = next_id
+                        break
+            repeat_id.add(tool_call["id"])
+
         for tool_call in tool_calls:
             tool_call_id = tool_call["id"]
             tool_name = tool_call["function"]["name"]
-            tool_args = tool_call["function"]["arguments"]
-            self.run_tool(tool_name, tool_args, tool_call_id)
-
-    def run_tool(self, tool_name: str, tool_args: str, tool_call_id: str):
-        tool_function: Callable = TOOL_FUNCTIONS.get(tool_name)
-        if tool_function is None:
-            self.append_message("tool", f"Tool {tool_name} not found.", {"tool_call_id": tool_call_id})
-            return
-        try:
-            result: Any = tool_function(**json.loads(tool_args))
-            self.append_message("tool", f"Tool {tool_name} returned: {result}", {"tool_call_id": tool_call_id})
-        except Exception as e:
-            self.append_message("tool", f"Tool {tool_name} raised an exception: {e}", {"tool_call_id": tool_call_id})
+            tool_args: str = tool_call["function"]["arguments"]
+            tool_message = run_tool(tool_name, tool_args)
+            self.append_message("tool", tool_message, {"tool_call_id": tool_call_id})

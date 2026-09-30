@@ -95,7 +95,8 @@ def verify_normal_completion() -> dict:
     tool_result = client.requests[1][3]
     assert assistant_call["tool_calls"][0]["id"] == tool_result["tool_call_id"]
     assert assistant_call["reasoning_content"] == "Use add"
-    assert tool_result["content"] == "Tool add returned: 18"
+    assert tool_result["content"].startswith("Tool add returned:")
+    assert float(tool_result["content"].split(":", 1)[1].strip()) == 18
     return trace("normal_completion", agent, client, "final_response")
 
 
@@ -127,7 +128,8 @@ def verify_tool_failure() -> dict:
     assistant_call = client.requests[1][2]
     tool_result = client.requests[1][3]
     assert assistant_call["tool_calls"][0]["id"] == tool_result["tool_call_id"]
-    assert "raised an exception" in tool_result["content"]
+    assert "invalid" in tool_result["content"].lower()
+    assert "returned:" not in tool_result["content"]
     return trace("tool_failure", agent, client, "tool_error_then_final_response")
 
 
