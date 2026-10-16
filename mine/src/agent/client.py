@@ -9,6 +9,7 @@ class Client(abc.ABC):
     def chat(self, messages: list[dict[str, str]], **kwargs) -> dict[str, Any]:
         pass
 
+
 class DeepseekClient(Client):
     def __init__(self, api_key: str = "", base_url: str = "https://api.deepseek.com", tools: list = None):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")

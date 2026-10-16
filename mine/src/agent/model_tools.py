@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable, Any
 import json
-from agent.state import State
+from agent.session import State
 import importlib, pkgutil
 import agent.tools
 

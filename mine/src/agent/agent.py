@@ -1,6 +1,6 @@
 from agent.model_tools import tools_schema, run_tool
 from agent.client import Client, DeepseekClient
-from agent.state import State
+from agent.session import Session
 from typing import Any
 
 
@@ -8,11 +8,14 @@ class Agent:
     """暂时接deepseek"""
     MAX_ITERATIONS = 5
 
-    def __init__(self, system_message: str):
-        self.conversation_history = [{"role": "system", "content": system_message}]
+    def __init__(self, system_message: str, resume: bool, resume_id: str = "" ):
         self.tools = tools_schema()
         self.client: Client = DeepseekClient(tools=self.tools)
-        self.state = State()
+        self.session = Session.load_session(resume_id) if resume else Session(system_message)
+
+    @property
+    def conversation_history(self):
+        return self.session.conversation_history
 
     def append_message(self, role: str, content: str, extra=None):
         extra = extra or {}
@@ -51,8 +54,8 @@ class Agent:
         for tool_call in tool_calls:
             if "id" not in tool_call or not tool_call["id"] or tool_call["id"] in repeat_id:
                 while True:
-                    next_id = f"{self.state.tool_call_id_prefix}{self.state.tool_call_id_counter}"
-                    self.state.tool_call_id_counter += 1
+                    next_id = f"{self.session.tool_call_id_prefix}{self.session.tool_call_id_counter}"
+                    self.session.tool_call_id_counter += 1
                     if next_id not in repeat_id:
                         tool_call["id"] = next_id
                         break
