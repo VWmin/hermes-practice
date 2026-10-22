@@ -5,7 +5,7 @@ load_dotenv(override=True)
 
 
 def main():
-    agent = Agent(system_message="You are a helpful assistant.")
+    agent = Agent(system_message="You are a helpful assistant.", resume=True)
     while True:
         user_message = input("User: ")
         if user_message.lower() in ["exit", "quit"]:

@@ -11,7 +11,9 @@ class Agent:
     def __init__(self, system_message: str, resume: bool, resume_id: str = "" ):
         self.tools = tools_schema()
         self.client: Client = DeepseekClient(tools=self.tools)
-        self.session = Session.load_session(resume_id) if resume else Session(system_message)
+        self.session = Session.load_session(resume_id) if resume else Session(
+            system_message=system_message
+        )
 
     @property
     def conversation_history(self):
@@ -21,12 +23,16 @@ class Agent:
         extra = extra or {}
         self.conversation_history.append({"role": role, "content": content, **extra})
 
+    def persist_session(self):
+        self.session.flush()
+
     def api_call(self):
         response = self.client.chat(messages=self.conversation_history)
         return response
 
     def run_conversation(self, user_message: str) -> str:
         self.append_message("user", user_message)
+        self.persist_session()
         cur_iteration = 0
         while cur_iteration < self.MAX_ITERATIONS:
             response = self.api_call()
@@ -43,6 +49,7 @@ class Agent:
         else:
             raise RuntimeError("Max iterations reached without a final response.")
 
+        self.persist_session()
         return self.last_message()
 
     def last_message(self) -> str:
@@ -67,3 +74,4 @@ class Agent:
             tool_args: str = tool_call["function"]["arguments"]
             tool_message = run_tool(tool_name, tool_args)
             self.append_message("tool", tool_message, {"tool_call_id": tool_call_id})
+            self.persist_session()
